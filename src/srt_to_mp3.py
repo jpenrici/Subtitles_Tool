@@ -114,12 +114,12 @@ def kdenlive_format(lines: list, token: str) -> list:
     # Template
     # example.kdenlive.srt
     # 1
-    # 00: 03:00, 000 --> 00: 05:00, 000
-    # Olá!
+    # 00: 00:00, 000 --> 00: 05:00, 000
+    # Texto
     #
     # 2
     # 00: 10:00, 000 --> 00: 15:00, 000
-    # Estou falando em Português.
+    # Texto
 
     result = []
     if len(lines) < 3:
@@ -130,9 +130,10 @@ def kdenlive_format(lines: list, token: str) -> list:
     last_ms: float = 0.0
 
     def convert(value: str):
-        n = value.split(":")
-        n[-1] = n[-1].replace(",", ".")
-        return float(n[0]) * 60 * 1000 + float(n[1]) * 1000 + float(n[2])
+        hour, minutes, seconds = value.split(":")
+        seconds, milliseconds = seconds.split(",")
+        return (float(hour) * 60 * 60 * 1000 + float(minutes) * 60 * 1000 +
+                float(seconds) * 1000 + float(milliseconds))
 
     # Read lines.
     for i in range(0, len(lines), 3):
@@ -144,10 +145,8 @@ def kdenlive_format(lines: list, token: str) -> list:
             if re.fullmatch(rgx, line):
                 values = line.split(" --> ")
                 if len(values) == 2:
-                    milliseconds = convert(values[0])
-                    result += [f"{token}{milliseconds - last_ms}"]
-                    nums = values[1].split(":")
-                    nums[-1] = nums[-1].replace(",", ".")
+                    ms = convert(values[0])
+                    result += [f"{token}{ms - last_ms}"]
                     last_ms = convert(values[1])
                 # Line 3 : Text.
                 line = lines[i + 2].replace("\n", "").strip()
@@ -188,9 +187,9 @@ def main(args: list):
     inform = (
         "Convert SRT to Speech \n"
         "use:\n"
-        "    script.py srt=<srt_input_file>\n"
-        "    script.py srt=<srt_input_file> mp3=<mp3_output_file>\n"
-        "    script.py srt=<srt_input_file> mp3=<mp3_output_file> format=<srt_format>\n"
+        "    python3 script.py srt=<srt_input_file>\n"
+        "    python3 script.py srt=<srt_input_file> mp3=<mp3_output_file>\n"
+        "    python3 script.py srt=<srt_input_file> mp3=<mp3_output_file> format=<srt_format>\n"
     )
 
     # Check number of arguments.
@@ -266,7 +265,7 @@ def main(args: list):
 
 if __name__ == '__main__':
     # Example
-    main(['srt="./example.kdenlive.srt"', 'format=kdenlive' , 'mp3="./output.mp3"'])
+    # main(['srt="./example.kdenlive.srt"', 'format=kdenlive' , 'mp3="./output.mp3"'])
 
     # Command line
-    # main(sys.argv)
+    main(sys.argv)
