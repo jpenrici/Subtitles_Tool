@@ -9,14 +9,14 @@ import re
 import sys
 
 from io import BytesIO
-from typing import List, Tuple
+from typing import Tuple
 
 # Google Text-to-Speech library.
 # https://gtts.readthedocs.io/en/latest/index.html
 from gtts import gTTS
 
 # Pydub - Manipulate audio with a simple and easy high level interface.
-# https://pypi.org/project/pydub/
+# https://github.com/jiaaro/pydub
 from pydub import AudioSegment
 
 
@@ -67,8 +67,8 @@ def text_to_speech(data: Data) -> bool:
     # Audio segments.
     audio_parts = []
 
-    # Copy voices
-    counter = 0
+    # History and Copy voices
+    history = "Time(ms);Duration(ms);Description\n"
     filename = data.mp3_filename.lower().replace(".mp3", "")
     output_dir = data.mp3_path.replace(data.mp3_filename, "")
     if output_dir == "":
@@ -77,27 +77,56 @@ def text_to_speech(data: Data) -> bool:
         output_dir += "/"
 
     try:
-
+        counter = 0
+        total_ms = 0.0
+        last_duration_ms : float = 0.0
         for part in data.lines:
             part = part.strip()
             if re.fullmatch("^" + data.token + ".+", part):
-                wait = round(float(part.replace(data.token, "")), 2)
-                print(f"Creating silence for {wait} ms ...")
-                audio_parts.append(AudioSegment.silent(duration=wait))
+                wait = round(float(part.replace(data.token, "")) - last_duration_ms, 4)
+                if wait > 0:
+                    print(f"Creating silence for {wait} ms ...")
+                    audio_parts.append(AudioSegment.silent(duration=wait))
+                    # Record.
+                    n1 = str(total_ms).replace(".", ",")
+                    n2 = str(wait).replace(".", ",")
+                    history += f"{n1}; {n2}; Silent.\n"
+                    total_ms += wait
             else:
                 print(f"Generating speech for: {part}")
+                # gTTS
                 tts = gTTS(text=part, lang=data.language, slow=False)
+                # Saves the audio to a BytesIO object.
                 tts_fp = BytesIO()
                 tts.write_to_fp(tts_fp)
+                # Returns the cursor to the beginning of the buffer.
                 tts_fp.seek(0)
-                audio_parts.append(AudioSegment.from_file(tts_fp, format="mp3"))
+                # Load audio from BytesIO using pydub.
+                audio_part = AudioSegment.from_file(tts_fp, format="mp3")
+                # Stores part.
+                audio_parts.append(audio_part)
+                # Get audio duration.
+                last_duration_ms = len(audio_part)
+                # Record.
+                n1 = str(total_ms).replace(".", ",")
+                n2 = str(last_duration_ms).replace(".", ",")
+                history += f"{n1}; {n2}; {part}\n"
+                total_ms += last_duration_ms
+
+                # Save copies.
                 if data.mp3_voices:
                     tts.save(f"{output_dir}{filename}_part_{counter}.mp3")
                     counter += 1
 
+        # Save history.
+        if history != "":
+            save(f"{output_dir}{filename}_history.csv", history)
+
+        # Finish conversion by joining muted parts and voices.
         if audio_parts:
+            comments = f"Audio generated using the {data.srt_filename} file."
             final_audio = sum(audio_parts)
-            final_audio.export(data.mp3_path, format="mp3")
+            final_audio.export(data.mp3_path, format="mp3", tags={'comments' : comments})
             return True
 
     except Exception as e:
@@ -115,6 +144,17 @@ def load(filename: str, text_coding: str ='UTF-8') -> list[str]:
     except Exception as e:
         print("Unexpected error:", e)
     return []
+
+
+def save(filename: str, text: str) -> bool:
+    try:
+        f = open(filename, "w")
+        f.write(text)
+        f.close()
+    except Exception as e:
+        print("Unexpected error:", e)
+        return False
+    return True
 
 
 def kdenlive_format(lines: list, token: str) -> list[str]:
@@ -149,11 +189,11 @@ def kdenlive_format(lines: list, token: str) -> list[str]:
         """Extracts the time range from a line."""
         rgx = r"^\d{2}:\d{2}:\d{2},\d{3}.-->.\d{2}:\d{2}:\d{2},\d{3}$"
         if re.fullmatch(rgx, line):
-            values = line.split(" --> ")
-        if len(values) == 2:
-            start_time = _parse_time(values[0])
-            end_time = _parse_time(values[1])
-            return start_time, end_time
+            t = line.split(" --> ")
+            if len(t) == 2:
+                left = _parse_time(t[0])
+                right = _parse_time(t[1])
+                return left, right
         return None     
 
     # Read lines.
@@ -254,7 +294,7 @@ def main(args: list):
             "  python3 script.py srt=<input.srt> mp3=<output.mp3>\n"
             "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive>\n"
             "To copy voices also use the --voices command:\n"
-            "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive> --voices"
+            "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive> --voices\n"
         )
         return
 
