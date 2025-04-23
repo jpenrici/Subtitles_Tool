@@ -76,8 +76,13 @@ def text_to_speech(data: Data) -> bool:
     elif not output_dir.endswith("/"):
         output_dir += "/"
 
+    def log_entry(start_ms: float, duration_ms: float, text: str) -> str:
+        n1 = str(start_ms).replace(".", ",")
+        n2 = str(duration_ms).replace(".", ",")
+        return f"{n1}; {n2}; {text}\n"
+
     try:
-        counter = 0
+        counter = 1
         total_ms = 0.0
         last_duration_ms : float = 0.0
         for part in data.lines:
@@ -88,9 +93,8 @@ def text_to_speech(data: Data) -> bool:
                     print(f"Creating silence for {wait} ms ...")
                     audio_parts.append(AudioSegment.silent(duration=wait))
                     # Record.
-                    n1 = str(total_ms).replace(".", ",")
-                    n2 = str(wait).replace(".", ",")
-                    history += f"{n1}; {n2}; Silent.\n"
+                    history += log_entry(total_ms, wait, "Silent.")
+                    # Update.
                     total_ms += wait
             else:
                 print(f"Generating speech for: {part}")
@@ -108,14 +112,13 @@ def text_to_speech(data: Data) -> bool:
                 # Get audio duration.
                 last_duration_ms = len(audio_part)
                 # Record.
-                n1 = str(total_ms).replace(".", ",")
-                n2 = str(last_duration_ms).replace(".", ",")
-                history += f"{n1}; {n2}; {part}\n"
+                history += log_entry(total_ms, last_duration_ms, part)
+                # Update.
                 total_ms += last_duration_ms
 
                 # Save copies.
                 if data.mp3_voices:
-                    tts.save(f"{output_dir}{filename}_part_{counter}.mp3")
+                    tts.save(f"{output_dir}{filename}_part_{str(counter).zfill(3)}.mp3")
                     counter += 1
 
         # Save history.
@@ -179,20 +182,20 @@ def kdenlive_format(lines: list, token: str) -> list[str]:
     if len(lines) < 3:
         return result
 
-    def _parse_time(value: str):
+    def parse_time(value: str):
         """Converts time string (HH:MM:SS,MS) to milliseconds."""
         h, m, s = value.split(":")
         s, ms = s.split(",")
         return float(h) * 3600000 + float(m) * 60000 + float(s) * 1000 + float(ms)
 
-    def _extract_time_range(line: str) -> Tuple[float, float] | None:
+    def extract_time_range(line: str) -> Tuple[float, float] | None:
         """Extracts the time range from a line."""
         rgx = r"^\d{2}:\d{2}:\d{2},\d{3}.-->.\d{2}:\d{2}:\d{2},\d{3}$"
         if re.fullmatch(rgx, line):
             t = line.split(" --> ")
             if len(t) == 2:
-                left = _parse_time(t[0])
-                right = _parse_time(t[1])
+                left = parse_time(t[0])
+                right = parse_time(t[1])
                 return left, right
         return None     
 
@@ -204,7 +207,7 @@ def kdenlive_format(lines: list, token: str) -> list[str]:
             continue  # Ignore if line is not a number.
         # Check time range.
         time_line = lines[i + 1].strip()
-        time_range = _extract_time_range(time_line)
+        time_range = extract_time_range(time_line)
         if time_range:
             start_time, _ = time_range
             result.append(f"{token}{start_time - last_ms}")
