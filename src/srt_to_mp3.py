@@ -9,6 +9,7 @@ import re
 import sys
 
 from io import BytesIO
+from typing import List, Tuple
 
 # Google Text-to-Speech library.
 # https://gtts.readthedocs.io/en/latest/index.html
@@ -105,7 +106,7 @@ def text_to_speech(data: Data) -> bool:
     return False
 
 
-def load(filename: str, text_coding='UTF-8') -> list:
+def load(filename: str, text_coding: str ='UTF-8') -> list[str]:
     try:
         if os.path.exists(filename):
             with open(filename, encoding=text_coding) as f:
@@ -116,54 +117,68 @@ def load(filename: str, text_coding='UTF-8') -> list:
     return []
 
 
-def kdenlive_format(lines: list, token: str) -> list:
+def kdenlive_format(lines: list, token: str) -> list[str]:
+    """
+    Parses an SRT file in Kdenlive format.
+
+    Args:
+    lines: List of lines in the SRT file.
+    token: Token to indicate timeout.
+
+    Returns:
+    List of strings containing the text and timeouts.
+    """
 
     # Template
     # example.kdenlive.srt
     # 1
-    # 00: 00:00, 000 --> 00: 05:00, 000
-    # Texto
-    #
-    # 2
-    # 00: 10:00, 000 --> 00: 15:00, 000
-    # Texto
+    # 00: 00:00, 000 --> 00: 00:05, 000
+    # Text
 
     result: list = []
     if len(lines) < 3:
         return result
 
-    # Wait regex.
-    rgx = r"^\d{2}:\d{2}:\d{2},\d{3}.-->.\d{2}:\d{2}:\d{2},\d{3}$"
-    last_ms: float = 0.0
-
-    def convert(value: str):
+    def _parse_time(value: str):
+        """Converts time string (HH:MM:SS,MS) to milliseconds."""
         h, m, s = value.split(":")
         s, ms = s.split(",")
         return float(h) * 3600000 + float(m) * 60000 + float(s) * 1000 + float(ms)
 
+    def _extract_time_range(line: str) -> Tuple[float, float] | None:
+        """Extracts the time range from a line."""
+        rgx = r"^\d{2}:\d{2}:\d{2},\d{3}.-->.\d{2}:\d{2}:\d{2},\d{3}$"
+        if re.fullmatch(rgx, line):
+            values = line.split(" --> ")
+        if len(values) == 2:
+            start_time = _parse_time(values[0])
+            end_time = _parse_time(values[1])
+            return start_time, end_time
+        return None     
+
     # Read lines.
+    last_ms: float = 0.0
     for i in range(0, len(lines), 3):
-        # Line 1 : Number.
-        line = lines[i].replace("\n", "").strip()
-        if line.isdigit():
-            # Line 2 : Time (00:00:00,000 --> 00:00:00,000)
-            line = lines[i + 1].replace("\n", "").strip()
-            if re.fullmatch(rgx, line):
-                values = line.split(" --> ")
-                if len(values) == 2:
-                    ms = convert(values[0])
-                    result += [f"{token}{ms - last_ms}"]
-                    last_ms = ms
-                # Line 3 : Text.
-                line = lines[i + 2].replace("\n", "").strip()
-                if line != "":
-                    result += [line]
+        # Check number.
+        if not lines[i].strip().isdigit():
+            continue  # Ignore if line is not a number.
+        # Check time range.
+        time_line = lines[i + 1].strip()
+        time_range = _extract_time_range(time_line)
+        if time_range:
+            start_time, _ = time_range
+            result.append(f"{token}{start_time - last_ms}")
+            last_ms = start_time
+        # Check text.
+        text_line = lines[i + 2].strip()
+        if text_line:
+            result.append(text_line)
 
     # print(result)
     return result
 
 
-def prepare(data: Data) -> list:
+def prepare(data: Data) -> list[str]:
 
     # Load SRT file
     data.lines = load(data.srt_path)
@@ -237,9 +252,8 @@ def main(args: list):
             "Usage:\n"
             "  python3 script.py srt=<input.srt>\n"
             "  python3 script.py srt=<input.srt> mp3=<output.mp3>\n"
-            "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive>"
-            "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive>"
-            "To copy voices also use the --voices command:"
+            "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive>\n"
+            "To copy voices also use the --voices command:\n"
             "  python3 script.py srt=<input.srt> mp3=<output.mp3> format=<kdenlive> --voices"
         )
         return
@@ -255,7 +269,8 @@ def main(args: list):
 
     print("Converting text to speech ...")
     if text_to_speech(data):
-        print(f"Success: '{data.mp3_filename}' generated from '{data.srt_filename}'.")
+        complement = " and individual voice fills" if data.mp3_voices else ""
+        print(f"Success: '{data.mp3_filename}'{complement} generated from '{data.srt_filename}'.")
     else:
         print("Error: Failed to generate MP3 file.")
 
